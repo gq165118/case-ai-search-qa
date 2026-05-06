@@ -1,0 +1,119 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Codex: 日常开发（安全自动，等价 full-auto）",
+      "type": "shell",
+      "command": "codex -s workspace-write -a untrusted -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "工作区可写；仅「可信」命令免确认，敏感 shell 仍会询问。本机 CLI 无 --full-auto 时使用此组合。"
+    },
+    {
+      "label": "Codex: 恢复会话（选择历史）",
+      "type": "shell",
+      "command": "codex resume -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "交互式选择要恢复的会话。"
+    },
+    {
+      "label": "Codex: 恢复上一会话（--last）",
+      "type": "shell",
+      "command": "codex resume --last -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "直接接续最近一次会话，无需再选。"
+    },
+    {
+      "label": "Codex: 只读沙盒（read-only）",
+      "type": "shell",
+      "command": "codex -s read-only -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "探索代码、查依赖、考古；模型侧 shell 策略为只读沙盒。"
+    },
+    {
+      "label": "Codex: 使用 Profile 启动",
+      "type": "shell",
+      "command": "codex -p \"${input:codexProfile}\" -s workspace-write -a untrusted -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "读取 %USERPROFILE%\\.codex\\config.toml（或 CODEX_HOME）里配置的 profile。"
+    },
+    {
+      "label": "Codex: 作为 MCP 服务（stdio，mcp-server）",
+      "type": "shell",
+      "command": "codex mcp-server -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "供 Cursor 等通过 MCP 连接；管理外部 MCP 用子命令 codex mcp。"
+    },
+    {
+      "label": "Codex: 授权额外可写目录（--add-dir）",
+      "type": "shell",
+      "command": "codex -s workspace-write -a untrusted --add-dir \"${input:codexExtraDir}\" -C \"${workspaceFolder}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "前后端分仓时填入另一仓库根目录等绝对路径。"
+    },
+    {
+      "label": "Codex: exec 非交互 JSONL（--json）",
+      "type": "shell",
+      "command": "codex exec --json -s workspace-write -a never -C \"${workspaceFolder}\" \"${input:codexExecPrompt}\"",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "detail": "脚本/流水线用；审批策略为 never 适合无人值守，请自行评估风险。"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "codexProfile",
+      "type": "promptString",
+      "description": "config.toml 中的 profile 名称",
+      "default": "default"
+    },
+    {
+      "id": "codexExtraDir",
+      "type": "promptString",
+      "description": "额外可写目录的绝对路径（例如另一 Git 仓库根）"
+    },
+    {
+      "id": "codexExecPrompt",
+      "type": "promptString",
+      "description": "传给 codex exec 的单次指令文本"
+    }
+  ]
+}
