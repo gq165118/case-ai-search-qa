@@ -7,7 +7,7 @@
 - **多文档问答**：自动加载 `docs/` 目录中的 `.txt`、`.pdf` 保险文档。
 - **Qwen Agent RAG**：继续使用 Qwen Agent 组织文件、检索结果和模型回答。
 - **Elasticsearch 检索后端**：通过 `rag_cfg.rag_backend = elasticsearch` 将底层 retrieval 扩展到 ES。
-- **Tavily MCP 可选联网搜索**：配置 `ENABLE_TAVILY_MCP=true` 后，可让 Qwen Agent 在需要时调用 Tavily MCP。
+- **Tavily MCP 可选联网搜索**：配置 `TAVILY_API_KEY` 后，可在 GUI 中按本轮开关允许 Qwen Agent 调用 Tavily MCP。
 - **引用可追溯**：Web 页面展示本次回答参考的文档和片段。
 - **过程可观测**：展示问题处理、ES 状态、文档检索、模型生成等关键步骤。
 - **本地 Web 体验**：无需额外前端工程，启动脚本即可打开浏览器使用。
@@ -105,14 +105,13 @@ $EsHome = "D:\AI-App-Development\elastic\elasticsearch-9.4.0"
 
 也可以自行用 Docker 或本机服务启动 ES，只要保证 `http://localhost:9200` 可访问即可。
 
-### 5. 可选启用 Tavily MCP
+### 5. 可选配置 Tavily MCP
 
-默认情况下，文档问答不会启用 Tavily MCP，避免没有网络搜索需求时影响启动。
+默认情况下，文档问答不会打开联网搜索。是否联网不再通过 `.env` 开关控制，而是在 GUI 里按每一轮提问单独打开或关闭。
 
 如需让 Qwen Agent 在用户明确要求联网搜索、查询最新信息，或本地文档没有依据时调用 Tavily，可在 `.env` 中配置：
 
 ```text
-ENABLE_TAVILY_MCP=true
 TAVILY_API_KEY=your_tavily_api_key
 ```
 
@@ -122,7 +121,7 @@ Tavily MCP 通过 `npx -y tavily-mcp@0.1.3` 启动，因此本机需要安装 No
 TAVILY_MCP_COMMAND=C:\Program Files\nodejs\npx.cmd
 ```
 
-GUI 右侧会显示“联网搜索”面板：如果只是启用了 Tavily MCP，会显示“等待模型判断是否需要联网”；只有当调试过程出现“联网搜索调用/联网搜索完成”时，才表示本轮真的使用了 Tavily 联网搜索。
+GUI 右侧会显示“联网搜索”面板和“本轮联网”开关：开关关闭时本轮只使用本地文档检索；开关打开后，模型仍只会在需要时调用 Tavily。只有当调试过程出现“联网搜索调用/联网搜索完成”时，才表示本轮真的使用了 Tavily 联网搜索。
 
 ## 运行项目
 
@@ -196,15 +195,15 @@ docs 文件
 
 ## Tavily MCP 配置
 
-Tavily MCP 在 `qwen_agent_multi_files_config.py` 中按 `.env` 开关动态加入 Qwen Agent 的 `function_list`。
+Tavily MCP 在 `qwen_agent_multi_files_config.py` 中只读取 `TAVILY_API_KEY` 和可选的 `TAVILY_MCP_COMMAND`。是否把 Tavily 工具加入 Qwen Agent 的 `function_list`，由 GUI 本轮开关传给后端决定。
 
-默认：
+本轮联网关闭时：
 
 ```python
-tools = []
+build_agent_tools(enable_tavily=False)
 ```
 
-启用后会追加：
+本轮联网打开且已配置 `TAVILY_API_KEY` 时，会追加：
 
 ```python
 {

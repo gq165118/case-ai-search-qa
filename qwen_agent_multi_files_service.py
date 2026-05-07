@@ -2,28 +2,29 @@
 from qwen_agent.agents.assistant import Assistant, format_knowledge_to_source_and_content
 
 from qwen_agent_multi_files_config import (
+    build_agent_tools,
     es_debug_status,
     llm_cfg,
     load_doc_files,
     rag_cfg,
     system_instruction,
     tavily_mcp_info,
-    tools,
 )
 
 
-# modified by gq [2026-05-06：封装文档加载与智能体初始化，供终端模式和 GUI 模式复用]
-def init_agent_service() -> Assistant:
+# modified by gq [2026-05-08：封装文档加载与智能体初始化，并按本轮开关决定是否注入 Tavily 工具]
+def init_agent_service(enable_tavily: bool = False) -> Assistant:
     files = load_doc_files()
     print('files=', files)
+    agent_tools = build_agent_tools(enable_tavily=enable_tavily)
 
     # return Assistant(llm=llm_cfg,
     #                  system_message=system_instruction,
-    #                  function_list=tools,
+    #                  function_list=agent_tools,
     #                  files=files)
     return Assistant(llm=llm_cfg,
                      system_message=system_instruction,
-                     function_list=tools,
+                     function_list=agent_tools,
                      files=files,
                      rag_cfg=rag_cfg)
 # mod end
@@ -99,8 +100,40 @@ def retrieve_reference_docs(bot: Assistant, messages: list[dict]) -> tuple[str, 
 # add end
 
 
-# add by gq [2026-05-06：统一生成调试日志、参考文档和流式答案事件]
-def run_qa_events(bot: Assistant, query: str, history: list[dict]):
+# add by gq [2026-05-08：未联网时增加本地文档问答门禁，防止模型用通用知识回答文档外问题]
+LOCAL_DOC_DOMAIN_KEYWORDS = (
+    '保险', '保单', '保障', '责任', '免责', '免除', '条款', '理赔', '赔付', '赔偿', '报案', '投保',
+    '被保', '雇主', '雇员', '员工', '团体', '意外', '工伤', '伤残', '身故', '医疗', '保费',
+    '免赔', '等待期', '职业', '上下班', '误工', '津贴', '限额', '批单', '受益人', '95511',
+)
+
+
+def _is_local_doc_domain_query(query: str) -> bool:
+    normalized_query = (query or '').strip().lower()
+    if not normalized_query:
+        return False
+    return any(keyword.lower() in normalized_query for keyword in LOCAL_DOC_DOMAIN_KEYWORDS)
+
+
+def _should_call_model_for_local_docs(query: str, refs: list[dict], web_search_enabled: bool) -> bool:
+    if web_search_enabled:
+        return True
+    return bool(refs) and _is_local_doc_domain_query(query)
+
+
+def _local_docs_only_messages(messages: list[dict]) -> list[dict]:
+    return [{
+        'role': 'system',
+        'content': (
+            '请严格只依据上面提供的本地参考文档回答。'
+            '如果参考文档没有直接依据，请回答“根据本地文档未找到相关信息”，不要使用常识、训练知识或猜测补充。'
+        ),
+    }] + list(messages)
+# add end
+
+
+# modified by gq [2026-05-08：增加本轮联网搜索开关状态，GUI 控制是否允许 Tavily 工具参与]
+def run_qa_events(bot: Assistant, query: str, history: list[dict], web_search_enabled: bool = False):
     messages = []
     for message in history:
         if message.get('role') in ('user', 'assistant') and message.get('content'):
@@ -110,12 +143,15 @@ def run_qa_events(bot: Assistant, query: str, history: list[dict]):
     yield {'type': 'log', 'message': '收到问题，开始准备检索。'}
     yield {'type': 'log', 'message': f'当前知识库文件数：{len(load_doc_files())}'}
     tavily_info = tavily_mcp_info()
-    if tavily_info['enabled']:
+    if web_search_enabled and tavily_info['available']:
         yield {'type': 'web_search', 'status': 'enabled', 'tool': 'Tavily MCP'}
-        yield {'type': 'log', 'message': '联网搜索：Tavily MCP 已启用，模型仅在需要时调用。'}
+        yield {'type': 'log', 'message': '联网搜索：本轮已打开 Tavily MCP，模型仅在需要时调用。'}
+    elif web_search_enabled:
+        yield {'type': 'web_search', 'status': 'disabled', 'tool': 'Tavily MCP'}
+        yield {'type': 'log', 'message': '联网搜索：本轮请求打开，但未配置 TAVILY_API_KEY，仍只使用本地文档检索。'}
     else:
         yield {'type': 'web_search', 'status': 'disabled', 'tool': 'Tavily MCP'}
-        yield {'type': 'log', 'message': '联网搜索：未启用 Tavily MCP，本轮只使用本地文档检索。'}
+        yield {'type': 'log', 'message': '联网搜索：GUI 开关关闭，本轮只使用本地文档检索。'}
     if rag_cfg.get('rag_backend') == 'elasticsearch':
         for message in es_debug_status():
             yield {'type': 'log', 'message': message}
@@ -127,12 +163,20 @@ def run_qa_events(bot: Assistant, query: str, history: list[dict]):
             yield {'type': 'log', 'message': f'检索完成，参考文档：{ref_names}'}
         else:
             yield {'type': 'log', 'message': '检索完成，但未找到明显相关片段。'}
+        # modified by gq [2026-05-08：联网开关关闭时增加领域门禁，即使 ES 误召回也不让模型用通用知识补答]
+        if not _should_call_model_for_local_docs(query, refs, web_search_enabled):
+            yield {'type': 'answer', 'content': f'根据本地文档，未找到关于“{query.strip()}”的相关信息。'}
+            yield {'type': 'log', 'message': '本轮未启用联网搜索，且问题不属于本地保险文档问答范围或没有可靠参考，已跳过模型补答。'}
+            yield {'type': 'done'}
+            return
+        # mod end
 
         yield {'type': 'log', 'message': '开始调用模型生成回答。'}
         printed_answer = ''
         seen_tool_calls = set()
         seen_tool_results = set()
-        for response in bot.run(messages=messages, knowledge=knowledge, lang='zh'):
+        answer_messages = messages if web_search_enabled else _local_docs_only_messages(messages)
+        for response in bot.run(messages=answer_messages, knowledge=knowledge, lang='zh'):
             for event in _tavily_tool_events(response, seen_tool_calls, seen_tool_results):
                 yield event
             answer_text = assistant_answer_text(response)
@@ -147,7 +191,7 @@ def run_qa_events(bot: Assistant, query: str, history: list[dict]):
         yield {'type': 'log', 'message': f'处理失败：{exc}'}
         yield {'type': 'answer', 'content': f'处理失败：{exc}'}
         yield {'type': 'done'}
-# add end
+# mod end
 
 
 # add by gq [2026-05-07：抽离终端演示流程，主入口只负责模式分发]

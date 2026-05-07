@@ -37,25 +37,34 @@ def _build_rag_panel_html(rag_label: str, rag_info: dict | None) -> str:
 # add end
 
 
-# add by gq [2026-05-08：在 GUI 中展示 Tavily MCP 联网搜索启用状态]
+# modified by gq [2026-05-08：在 GUI 中展示 Tavily MCP 可用状态，并提供本轮联网开关]
 def _build_tavily_panel_html(tavily_info: dict | None) -> str:
     info = tavily_info or {}
-    enabled = bool(info.get('enabled'))
+    available = bool(info.get('available'))
     has_key = bool(info.get('has_key'))
     badge = html.escape(str(info.get('badge') or 'WEB'))
-    status = '已启用' if enabled else '未启用'
-    status_class = 'online' if enabled else 'offline'
+    status = '可用' if available else '未配置'
+    status_class = 'online' if available else 'offline'
     command = html.escape(str(info.get('command') or '-'))
     package = html.escape(str(info.get('package') or '-'))
     mode = html.escape(str(info.get('mode') or '-'))
     key_status = '已配置' if has_key else '未配置'
+    disabled_attr = '' if available else ' disabled'
+    initial_state = '已关闭，本轮只使用本地文档检索。' if available else '未配置 TAVILY_API_KEY，无法打开联网搜索。'
     return f'''
           <div class="backend-summary {status_class}">
             <span class="backend-badge">{badge}</span>
             <div>
               <strong>Tavily MCP：{status}</strong>
-              <p>仅在模型实际调用 Tavily 工具时才会联网搜索。</p>
+              <p>打开本轮开关后，模型需要时才会真正调用 Tavily。</p>
             </div>
+          </div>
+          <div class="web-toggle-row">
+            <span>本轮联网</span>
+            <label class="switch" title="控制本轮问答是否允许调用 Tavily MCP">
+              <input id="web-search-toggle" type="checkbox"{disabled_attr}>
+              <span class="slider"></span>
+            </label>
           </div>
           <dl class="backend-list">
             <div><dt>模式</dt><dd>{mode}</dd></div>
@@ -63,8 +72,8 @@ def _build_tavily_panel_html(tavily_info: dict | None) -> str:
             <div><dt>命令</dt><dd>{command}</dd></div>
             <div><dt>包</dt><dd>{package}</dd></div>
           </dl>
-          <div id="web-search-state" class="web-search-state {status_class}">本轮尚未开始。</div>'''
-# add end
+          <div id="web-search-state" class="web-search-state {status_class}">{initial_state}</div>'''
+# mod end
 
 
 # modified by gq [2026-05-08：首屏增加 ES 状态和 Tavily MCP 状态，便于确认检索来源]
@@ -77,10 +86,10 @@ def _build_page_html(doc_count: int,
     rag_backend = html.escape(str((rag_info or {}).get('backend') or rag_label))
     rag_panel_html = _build_rag_panel_html(rag_label, rag_info)
     tavily_panel_html = _build_tavily_panel_html(tavily_info)
-    tavily_enabled = bool((tavily_info or {}).get('enabled'))
+    tavily_available = bool((tavily_info or {}).get('available'))
     tavily_badge = html.escape(str((tavily_info or {}).get('badge') or 'WEB'))
-    tavily_status = 'Tavily 已启用' if tavily_enabled else 'Tavily 未启用'
-    tavily_status_class = 'status-web-on' if tavily_enabled else 'status-web-off'
+    tavily_status = 'Tavily 可用' if tavily_available else 'Tavily 未配置'
+    tavily_status_class = 'status-web-on' if tavily_available else 'status-web-off'
     quick_buttons = ''.join(
         f'<button type="button" class="quick-question">{html.escape(question)}</button>'
         for question in examples
@@ -124,6 +133,14 @@ def _build_page_html(doc_count: int,
     .web-search-state.offline {{ color: #475467; background: #f8fafc; border: 1px solid #d8dee9; }}
     .web-search-state.called {{ color: #1849a9; background: #eef4ff; border: 1px solid #c7d7fe; }}
     .web-search-state.completed {{ color: #14804a; background: #eaf7ef; border: 1px solid #c9ead5; }}
+    .web-toggle-row {{ display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding: 10px; border-radius: 8px; background: #f8fafc; border: 1px solid #d8dee9; font-size: 13px; font-weight: 700; }}
+    .switch {{ position: relative; display: inline-block; width: 44px; height: 24px; flex: 0 0 auto; }}
+    .switch input {{ opacity: 0; width: 0; height: 0; }}
+    .slider {{ position: absolute; cursor: pointer; inset: 0; background: #cbd5e1; border-radius: 999px; transition: .18s; }}
+    .slider:before {{ content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .18s; box-shadow: 0 1px 3px rgba(15, 23, 42, .24); }}
+    .switch input:checked + .slider {{ background: #e11d48; }}
+    .switch input:checked + .slider:before {{ transform: translateX(20px); }}
+    .switch input:disabled + .slider {{ cursor: not-allowed; opacity: .55; }}
     .debug-list {{ margin: 0; padding-left: 18px; color: #475467; font-size: 13px; line-height: 1.6; }}
     .ref-item {{ border-top: 1px solid #edf0f5; padding-top: 10px; margin-top: 10px; }}
     .ref-source {{ font-weight: 700; color: #2557d6; font-size: 13px; }}
@@ -205,6 +222,7 @@ def _build_page_html(doc_count: int,
     const debug = document.getElementById('debug');
     const refs = document.getElementById('refs');
     const webSearchState = document.getElementById('web-search-state');
+    const webSearchToggle = document.getElementById('web-search-toggle');
     const history = [];
 
     function render() {{
@@ -223,7 +241,7 @@ def _build_page_html(doc_count: int,
     function resetDebug() {{
       debug.innerHTML = '';
       refs.innerHTML = '暂无参考文档。';
-      setWebSearchState('本轮尚未开始。', 'offline');
+      resetWebSearchState();
     }}
 
     function addLog(message) {{
@@ -238,9 +256,25 @@ def _build_page_html(doc_count: int,
       webSearchState.className = 'web-search-state ' + state;
     }}
 
+    function resetWebSearchState() {{
+      if (!webSearchToggle) {{
+        setWebSearchState('本轮未启用联网搜索，只使用本地文档检索。', 'offline');
+        return;
+      }}
+      if (webSearchToggle.disabled) {{
+        setWebSearchState('未配置 TAVILY_API_KEY，无法打开联网搜索。', 'offline');
+        return;
+      }}
+      if (webSearchToggle.checked) {{
+        setWebSearchState('本轮联网开关已打开，等待提问。', 'online');
+      }} else {{
+        setWebSearchState('本轮联网开关已关闭，只使用本地文档检索。', 'offline');
+      }}
+    }}
+
     function renderWebSearch(event) {{
       if (event.status === 'disabled') setWebSearchState('本轮未启用联网搜索，只使用本地文档检索。', 'offline');
-      if (event.status === 'enabled') setWebSearchState('Tavily MCP 已启用，等待模型判断是否需要联网。', 'online');
+      if (event.status === 'enabled') setWebSearchState('本轮联网开关已打开，等待模型判断是否需要联网。', 'online');
       if (event.status === 'called') {{
         setWebSearchState('正在调用联网搜索工具：' + event.tool, 'called');
         addLog('联网搜索调用：' + event.tool);
@@ -278,7 +312,11 @@ def _build_page_html(doc_count: int,
         const res = await fetch('/api/chat-stream', {{
           method: 'POST',
           headers: {{'Content-Type': 'application/json'}},
-          body: JSON.stringify({{query: content, history: history.slice(0, -2)}})
+          body: JSON.stringify({{
+            query: content,
+            history: history.slice(0, -2),
+            web_search_enabled: webSearchToggle ? webSearchToggle.checked : false
+          }})
         }});
         const reader = res.body.getReader();
         const decoder = new TextDecoder('utf-8');
@@ -308,7 +346,12 @@ def _build_page_html(doc_count: int,
             }}
           }}
         }}
-        if (!streamFinished) addLog('响应流已结束。');
+        if (!streamFinished) {{
+          addLog('响应流已提前结束。');
+          if (history[history.length - 1].content === '正在检索文档并生成回答...') {{
+            history[history.length - 1].content = '响应流提前结束，请查看终端日志或关闭“本轮联网”后重试。';
+          }}
+        }}
       }} catch (err) {{
         history[history.length - 1].content = '请求失败：' + err;
       }} finally {{
@@ -319,6 +362,7 @@ def _build_page_html(doc_count: int,
     }}
 
     send.addEventListener('click', () => ask(query.value));
+    if (webSearchToggle) webSearchToggle.addEventListener('change', resetWebSearchState);
     query.addEventListener('keydown', e => {{
       if (e.key === 'Enter' && !e.shiftKey) {{
         e.preventDefault();
@@ -370,7 +414,20 @@ def run_web_app(event_factory,
             self.send_header('Connection', 'close')
             self.end_headers()
             try:
-                for event in event_factory(payload.get('query', ''), payload.get('history', [])):
+                for event in event_factory(
+                    payload.get('query', ''),
+                    payload.get('history', []),
+                    bool(payload.get('web_search_enabled', False)),
+                ):
+                    data = json.dumps(event, ensure_ascii=False).encode('utf-8')
+                    self.wfile.write(b'data: ' + data + b'\n\n')
+                    self.wfile.flush()
+            except Exception as exc:
+                for event in (
+                    {'type': 'log', 'message': f'后端处理异常：{exc}'},
+                    {'type': 'answer', 'content': f'后端处理异常：{exc}'},
+                    {'type': 'done'},
+                ):
                     data = json.dumps(event, ensure_ascii=False).encode('utf-8')
                     self.wfile.write(b'data: ' + data + b'\n\n')
                     self.wfile.flush()

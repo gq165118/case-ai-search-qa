@@ -16,10 +16,29 @@ def app_tui():
 
 def app_gui():
     """Start the Web UI while keeping AI QA logic in the service module."""
-    bot = init_agent_service()
+    local_bot = init_agent_service(enable_tavily=False)
+    web_bot = None
 
-    def event_factory(query: str, history: list[dict]):
-        return run_qa_events(bot, query, history)
+    # modified by gq [2026-05-08：由 GUI 本轮开关选择是否使用带 Tavily MCP 工具的 Agent，并把初始化异常返回页面]
+    def event_factory(query: str, history: list[dict], web_search_enabled: bool = False):
+        nonlocal web_bot
+        tavily_available = tavily_mcp_info().get('available', False)
+        if web_search_enabled and tavily_available:
+            if web_bot is None:
+                yield {'type': 'log', 'message': '本轮联网开关已打开，正在初始化 Tavily MCP。'}
+                yield {'type': 'web_search', 'status': 'enabled', 'tool': 'Tavily MCP'}
+                try:
+                    web_bot = init_agent_service(enable_tavily=True)
+                except Exception as exc:
+                    yield {'type': 'log', 'message': f'Tavily MCP 初始化失败：{exc}'}
+                    yield {'type': 'answer', 'content': f'Tavily MCP 初始化失败：{exc}\n\n请先关闭“本轮联网”开关继续使用本地 ES 文档检索，或检查 Node.js/npx、tavily-mcp 和 TAVILY_API_KEY 配置。'}
+                    yield {'type': 'done'}
+                    return
+                yield {'type': 'log', 'message': 'Tavily MCP 初始化完成。'}
+            yield from run_qa_events(web_bot, query, history, web_search_enabled=True)
+            return
+        yield from run_qa_events(local_bot, query, history, web_search_enabled=web_search_enabled)
+    # mod end
 
     run_web_app(
         event_factory,

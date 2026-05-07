@@ -92,15 +92,12 @@ llm_cfg = {
 
 
 # 步骤 3：创建一个智能体。这里我们以 `Assistant` 智能体为例，它能够读取文件并回答问题。
-# modified by gq [2026-05-07：文档问答默认不启用工具调用；Tavily MCP 仅在显式配置后加入工具列表]
+# modified by gq [2026-05-08：Tavily MCP 改为 GUI 本轮开关控制，环境变量只保存 Key 和命令]
 system_instruction = '''你是一个乐于助人的AI文档问答助手。
 请优先根据给定文档回答用户问题；如果文档中没有相关信息，请明确说明未在文档中找到依据。
-如果启用了 Tavily MCP，且用户明确要求联网搜索、查询最新信息或文档中没有相关依据时，可以使用 Tavily 工具补充检索。
+如果本轮开启了 Tavily MCP 联网搜索，且用户明确要求联网搜索、查询最新信息或文档中没有相关依据时，可以使用 Tavily 工具补充检索。
 你总是用中文回复用户。'''
-
-
-def _truthy_env(name: str) -> bool:
-    return (os.getenv(name) or '').strip().lower() in ('1', 'true', 'yes', 'on')
+# mod end
 
 
 def _resolve_tavily_mcp_command() -> str:
@@ -111,11 +108,9 @@ def _resolve_tavily_mcp_command() -> str:
 
 
 def _tavily_mcp_tool_config() -> dict | None:
-    if not _truthy_env('ENABLE_TAVILY_MCP'):
-        return None
     tavily_key = (os.getenv('TAVILY_API_KEY') or '').strip()
     if not tavily_key:
-        raise ValueError('已启用 ENABLE_TAVILY_MCP，但未在 .env 中配置 TAVILY_API_KEY')
+        return None
     return {
         'mcpServers': {
             'tavily-mcp': {
@@ -129,26 +124,33 @@ def _tavily_mcp_tool_config() -> dict | None:
     }
 
 
-# add by gq [2026-05-08：给 GUI 和调试日志提供 Tavily MCP 启用状态]
+# modified by gq [2026-05-08：给 GUI 和调试日志提供 Tavily MCP 可用状态，具体启停由 GUI 开关控制]
 def tavily_mcp_info() -> dict:
-    enabled = _truthy_env('ENABLE_TAVILY_MCP')
     has_key = bool((os.getenv('TAVILY_API_KEY') or '').strip())
+    available = has_key
     return {
-        'enabled': enabled,
+        'available': available,
         'has_key': has_key,
         'backend': 'Tavily MCP',
         'badge': 'WEB',
-        'mode': 'ENABLE_TAVILY_MCP=true' if enabled else 'ENABLE_TAVILY_MCP=false',
-        'command': _resolve_tavily_mcp_command() if enabled else '-',
+        'mode': 'GUI 本轮开关控制' if available else '未配置 TAVILY_API_KEY',
+        'command': _resolve_tavily_mcp_command() if available else '-',
         'package': 'tavily-mcp@0.1.3',
     }
-# add end
+# mod end
 
 
-tools = []
-_tavily_mcp_cfg = _tavily_mcp_tool_config()
-if _tavily_mcp_cfg:
-    tools.append(_tavily_mcp_cfg)
+# modified by gq [2026-05-08：按本轮 GUI 联网开关生成工具列表，不再由 ENABLE_TAVILY_MCP 环境变量控制]
+def build_agent_tools(enable_tavily: bool = False) -> list:
+    tools = []
+    if enable_tavily:
+        tavily_cfg = _tavily_mcp_tool_config()
+        if tavily_cfg:
+            tools.append(tavily_cfg)
+    return tools
+
+
+tools = build_agent_tools(enable_tavily=False)
 # mod end
 
 
