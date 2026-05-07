@@ -9,5 +9,6 @@ matplotlib
 numpy
 json5
 soundfile
+elasticsearch>=9.0.0,<10.0.0
 
 # qwen-agent-multi-files.py 的 Web GUI 使用 Python 标准库实现，不依赖 qwen-agent[gui]。

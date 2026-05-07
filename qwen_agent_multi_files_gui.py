@@ -1,4 +1,5 @@
 # add by gq [2026-05-07：拆分 Web GUI，避免主脚本混入界面代码]
+import html
 import json
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,7 +12,40 @@ DEFAULT_EXAMPLES = [
 ]
 
 
-def _build_page_html(doc_count: int, examples: list[str]) -> str:
+# add by gq [2026-05-07：在 GUI 中显式展示 ES 检索后端、地址和索引名]
+def _build_rag_panel_html(rag_label: str, rag_info: dict | None) -> str:
+    info = rag_info or {}
+    backend = html.escape(str(info.get('backend') or rag_label))
+    badge = html.escape(str(info.get('badge') or 'RAG'))
+    address = html.escape(str(info.get('address') or '-'))
+    index_name = html.escape(str(info.get('index_name') or '-'))
+    mode = html.escape(str(info.get('mode') or '-'))
+    label = html.escape(str(info.get('label') or rag_label))
+    return f'''
+          <div class="backend-summary">
+            <span class="backend-badge">{badge}</span>
+            <div>
+              <strong>{backend} 检索</strong>
+              <p>{label}</p>
+            </div>
+          </div>
+          <dl class="backend-list">
+            <div><dt>地址</dt><dd>{address}</dd></div>
+            <div><dt>索引</dt><dd>{index_name}</dd></div>
+            <div><dt>模式</dt><dd>{mode}</dd></div>
+          </dl>'''
+# add end
+
+
+# modified by gq [2026-05-07：首屏增加 ES 状态标签和检索后端面板，便于确认当前使用 Elasticsearch]
+def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_info: dict | None = None) -> str:
+    rag_badge = html.escape(str((rag_info or {}).get('badge') or 'RAG'))
+    rag_backend = html.escape(str((rag_info or {}).get('backend') or rag_label))
+    rag_panel_html = _build_rag_panel_html(rag_label, rag_info)
+    quick_buttons = ''.join(
+        f'<button type="button" class="quick-question">{html.escape(question)}</button>'
+        for question in examples
+    )
     return f'''<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -25,12 +59,23 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
     header {{ display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; }}
     h1 {{ margin: 0; font-size: 28px; line-height: 1.2; }}
     .subtitle {{ margin: 8px 0 0; color: #667085; font-size: 14px; }}
-    .status {{ color: #14804a; background: #eaf7ef; border: 1px solid #c9ead5; padding: 7px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }}
+    .header-status {{ display: flex; align-items: stretch; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }}
+    .status {{ display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }}
+    .status-doc {{ color: #14804a; background: #eaf7ef; border: 1px solid #c9ead5; }}
+    .status-rag {{ color: #1849a9; background: #eef4ff; border: 1px solid #c7d7fe; }}
+    .status-badge {{ display: inline-grid; place-items: center; min-width: 28px; height: 22px; padding: 0 6px; border-radius: 5px; color: #fff; background: #2557d6; font-weight: 800; font-size: 12px; }}
     .main-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: stretch; }}
     .chat {{ min-height: 520px; max-height: 66vh; overflow-y: auto; background: #fff; border: 1px solid #dfe4ec; border-radius: 8px; padding: 18px; }}
     .side {{ min-height: 520px; max-height: 66vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }}
     .panel {{ background: #fff; border: 1px solid #dfe4ec; border-radius: 8px; padding: 14px; }}
     .panel h2 {{ margin: 0 0 10px; font-size: 15px; }}
+    .backend-summary {{ display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: #f5f8ff; border: 1px solid #d6e4ff; border-radius: 8px; }}
+    .backend-summary p {{ margin: 4px 0 0; color: #475467; font-size: 12px; line-height: 1.45; word-break: break-all; }}
+    .backend-badge {{ flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 34px; height: 28px; padding: 0 7px; color: #fff; background: #2557d6; border-radius: 6px; font-size: 13px; font-weight: 800; }}
+    .backend-list {{ display: grid; gap: 8px; margin: 12px 0 0; font-size: 12px; }}
+    .backend-list div {{ display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; }}
+    .backend-list dt {{ color: #667085; }}
+    .backend-list dd {{ margin: 0; color: #172033; word-break: break-all; }}
     .debug-list {{ margin: 0; padding-left: 18px; color: #475467; font-size: 13px; line-height: 1.6; }}
     .ref-item {{ border-top: 1px solid #edf0f5; padding-top: 10px; margin-top: 10px; }}
     .ref-source {{ font-weight: 700; color: #2557d6; font-size: 13px; }}
@@ -51,6 +96,8 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
     .clear {{ border: 1px solid #d8dee9; background: #fff; color: #475467; border-radius: 6px; padding: 7px 12px; cursor: pointer; }}
     @media (max-width: 760px) {{
       header {{ align-items: flex-start; flex-direction: column; }}
+      .header-status {{ justify-content: flex-start; }}
+      .status {{ white-space: normal; }}
       .quick {{ grid-template-columns: 1fr; }}
       .main-grid {{ grid-template-columns: 1fr; }}
       .composer {{ grid-template-columns: 1fr; }}
@@ -66,11 +113,18 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
         <h1>保险文档问答助手</h1>
         <p class="subtitle">基于 docs 目录中的本地保险文档回答问题</p>
       </div>
-      <div class="status">知识库已加载：{doc_count} 个文件</div>
+      <div class="header-status">
+        <div class="status status-doc">知识库：{doc_count} 个文件</div>
+        <div class="status status-rag"><span class="status-badge">{rag_badge}</span>{rag_backend} 检索</div>
+      </div>
     </header>
     <section class="main-grid">
       <div id="chat" class="chat"><div class="empty">选择一个推荐问题，或在下方输入你的问题</div></div>
       <aside class="side">
+        <div class="panel">
+          <h2>检索后端</h2>
+{rag_panel_html}
+        </div>
         <div class="panel">
           <h2>调试过程</h2>
           <ol id="debug" class="debug-list"><li>等待提问。</li></ol>
@@ -82,7 +136,7 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
       </aside>
     </section>
     <section class="quick">
-      {''.join(f'<button type="button" class="quick-question">{question}</button>' for question in examples)}
+      {quick_buttons}
     </section>
     <section class="composer">
       <textarea id="query" placeholder="请输入保险文档相关问题..."></textarea>
@@ -201,11 +255,19 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
   </script>
 </body>
 </html>'''
+# mod end
 
 
-def run_web_app(event_factory, doc_count: int, host: str = '127.0.0.1', port: int = 7860, examples=None):
+# modified by gq [2026-05-07：接收结构化 RAG 信息，在页面中突出显示 ES 检索配置]
+def run_web_app(event_factory,
+                doc_count: int,
+                host: str = '127.0.0.1',
+                port: int = 7860,
+                examples=None,
+                rag_label: str = '默认检索',
+                rag_info: dict | None = None):
     examples = examples or DEFAULT_EXAMPLES
-    page_html = _build_page_html(doc_count, examples)
+    page_html = _build_page_html(doc_count, examples, rag_label, rag_info)
 
     class QAHandler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -247,4 +309,4 @@ def run_web_app(event_factory, doc_count: int, host: str = '127.0.0.1', port: in
     print(f'Web 界面准备就绪：{url}')
     webbrowser.open(url)
     server.serve_forever()
-# add end
+# mod end
