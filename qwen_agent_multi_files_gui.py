@@ -155,6 +155,8 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
         const reader = res.body.getReader();
         const decoder = new TextDecoder('utf-8');
         let buffer = '';
+        let streamFinished = false;
+        readLoop:
         while (true) {{
           const {{value, done}} = await reader.read();
           if (done) break;
@@ -170,8 +172,14 @@ def _build_page_html(doc_count: int, examples: list[str]) -> str:
               history[history.length - 1].content = event.content;
               render();
             }}
+            if (event.type === 'done') {{
+              streamFinished = true;
+              await reader.cancel();
+              break readLoop;
+            }}
           }}
         }}
+        if (!streamFinished) addLog('响应流已结束。');
       }} catch (err) {{
         history[history.length - 1].content = '请求失败：' + err;
       }} finally {{
@@ -208,6 +216,7 @@ def run_web_app(event_factory, doc_count: int, host: str = '127.0.0.1', port: in
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             self.wfile.write(body)
 
@@ -220,12 +229,15 @@ def run_web_app(event_factory, doc_count: int, host: str = '127.0.0.1', port: in
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
             self.send_header('Cache-Control', 'no-cache')
-            self.send_header('Connection', 'keep-alive')
+            self.send_header('Connection', 'close')
             self.end_headers()
-            for event in event_factory(payload.get('query', ''), payload.get('history', [])):
-                data = json.dumps(event, ensure_ascii=False).encode('utf-8')
-                self.wfile.write(b'data: ' + data + b'\n\n')
-                self.wfile.flush()
+            try:
+                for event in event_factory(payload.get('query', ''), payload.get('history', [])):
+                    data = json.dumps(event, ensure_ascii=False).encode('utf-8')
+                    self.wfile.write(b'data: ' + data + b'\n\n')
+                    self.wfile.flush()
+            finally:
+                self.close_connection = True
 
         def log_message(self, format, *args):
             return

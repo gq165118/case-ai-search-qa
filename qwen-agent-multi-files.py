@@ -134,23 +134,23 @@ def _assistant_answer_text(response_messages) -> str:
 # add end
 
 
-# add by gq [2026-05-06：提取 RAG 参考文档，供 GUI 调试面板展示]
-def _retrieve_reference_docs(bot: Assistant, messages: list[dict]) -> list[dict]:
+# add by gq [2026-05-07：将检索结果同时用于参考展示和答案生成，避免重复检索]
+def _retrieve_reference_docs(bot: Assistant, messages: list[dict]) -> tuple[str, list[dict]]:
     last = None
     for last in bot.mem.run(messages=messages, lang='zh'):
         pass
     if not last:
-        return []
+        return '', []
     knowledge = last[-1]['content'] if isinstance(last[-1], dict) else last[-1].content
     if not knowledge:
-        return []
+        return '', []
     refs = []
     for item in format_knowledge_to_source_and_content(knowledge):
         refs.append({
             'source': item.get('source', '未知文档'),
             'content': item.get('content', ''),
         })
-    return refs
+    return knowledge, refs
 # add end
 
 
@@ -165,7 +165,7 @@ def _run_qa_events(bot: Assistant, query: str, history: list[dict]):
     yield {'type': 'log', 'message': '收到问题，开始准备检索。'}
     yield {'type': 'log', 'message': f'当前知识库文件数：{len(_load_doc_files())}'}
     try:
-        refs = _retrieve_reference_docs(bot, messages)
+        knowledge, refs = _retrieve_reference_docs(bot, messages)
         yield {'type': 'refs', 'items': refs}
         if refs:
             ref_names = '、'.join(ref['source'] for ref in refs)
@@ -175,7 +175,7 @@ def _run_qa_events(bot: Assistant, query: str, history: list[dict]):
 
         yield {'type': 'log', 'message': '开始调用模型生成回答。'}
         printed_answer = ''
-        for response in bot.run(messages=messages):
+        for response in bot.run(messages=messages, knowledge=knowledge, lang='zh'):
             answer_text = _assistant_answer_text(response)
             if answer_text and answer_text != printed_answer:
                 printed_answer = answer_text
