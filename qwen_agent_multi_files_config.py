@@ -1,4 +1,5 @@
 import os
+import shutil
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -91,11 +92,47 @@ llm_cfg = {
 
 
 # 步骤 3：创建一个智能体。这里我们以 `Assistant` 智能体为例，它能够读取文件并回答问题。
-# modified by gq [2026-05-06：文档问答 demo 不启用工具调用，避免兼容模型只返回工具流程不输出正文]
+# modified by gq [2026-05-07：文档问答默认不启用工具调用；Tavily MCP 仅在显式配置后加入工具列表]
 system_instruction = '''你是一个乐于助人的AI文档问答助手。
 请优先根据给定文档回答用户问题；如果文档中没有相关信息，请明确说明未在文档中找到依据。
+如果启用了 Tavily MCP，且用户明确要求联网搜索、查询最新信息或文档中没有相关依据时，可以使用 Tavily 工具补充检索。
 你总是用中文回复用户。'''
+
+
+def _truthy_env(name: str) -> bool:
+    return (os.getenv(name) or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _resolve_tavily_mcp_command() -> str:
+    configured = (os.getenv('TAVILY_MCP_COMMAND') or '').strip()
+    if configured:
+        return configured
+    return shutil.which('npx') or shutil.which('npx.cmd') or 'npx'
+
+
+def _tavily_mcp_tool_config() -> dict | None:
+    if not _truthy_env('ENABLE_TAVILY_MCP'):
+        return None
+    tavily_key = (os.getenv('TAVILY_API_KEY') or '').strip()
+    if not tavily_key:
+        raise ValueError('已启用 ENABLE_TAVILY_MCP，但未在 .env 中配置 TAVILY_API_KEY')
+    return {
+        'mcpServers': {
+            'tavily-mcp': {
+                'command': _resolve_tavily_mcp_command(),
+                'args': ['-y', 'tavily-mcp@0.1.3'],
+                'env': {
+                    'TAVILY_API_KEY': tavily_key,
+                },
+            },
+        },
+    }
+
+
 tools = []
+_tavily_mcp_cfg = _tavily_mcp_tool_config()
+if _tavily_mcp_cfg:
+    tools.append(_tavily_mcp_cfg)
 # mod end
 
 

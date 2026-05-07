@@ -10,5 +10,6 @@ numpy
 json5
 soundfile
 elasticsearch>=9.0.0,<10.0.0
+mcp>=1.0.0  # add by gq [2026-05-07：启用 Tavily MCP 时需要 MCP Python 客户端]
 
 # qwen-agent-multi-files.py 的 Web GUI 使用 Python 标准库实现，不依赖 qwen-agent[gui]。

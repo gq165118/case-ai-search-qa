@@ -7,6 +7,7 @@
 - **多文档问答**：自动加载 `docs/` 目录中的 `.txt`、`.pdf` 保险文档。
 - **Qwen Agent RAG**：继续使用 Qwen Agent 组织文件、检索结果和模型回答。
 - **Elasticsearch 检索后端**：通过 `rag_cfg.rag_backend = elasticsearch` 将底层 retrieval 扩展到 ES。
+- **Tavily MCP 可选联网搜索**：配置 `ENABLE_TAVILY_MCP=true` 后，可让 Qwen Agent 在需要时调用 Tavily MCP。
 - **引用可追溯**：Web 页面展示本次回答参考的文档和片段。
 - **过程可观测**：展示问题处理、ES 状态、文档检索、模型生成等关键步骤。
 - **本地 Web 体验**：无需额外前端工程，启动脚本即可打开浏览器使用。
@@ -17,6 +18,7 @@
 - Python
 - Qwen Agent
 - Elasticsearch
+- Tavily MCP
 - OpenAI-compatible API
 - python-dotenv
 - Python 标准库 HTTP Server
@@ -103,6 +105,23 @@ $EsHome = "D:\AI-App-Development\elastic\elasticsearch-9.4.0"
 
 也可以自行用 Docker 或本机服务启动 ES，只要保证 `http://localhost:9200` 可访问即可。
 
+### 5. 可选启用 Tavily MCP
+
+默认情况下，文档问答不会启用 Tavily MCP，避免没有网络搜索需求时影响启动。
+
+如需让 Qwen Agent 在用户明确要求联网搜索、查询最新信息，或本地文档没有依据时调用 Tavily，可在 `.env` 中配置：
+
+```text
+ENABLE_TAVILY_MCP=true
+TAVILY_API_KEY=your_tavily_api_key
+```
+
+Tavily MCP 通过 `npx -y tavily-mcp@0.1.3` 启动，因此本机需要安装 Node.js/npm，并能执行 `npx`。如果 `npx` 不在 PATH，可额外配置：
+
+```text
+TAVILY_MCP_COMMAND=C:\Program Files\nodejs\npx.cmd
+```
+
 ## 运行项目
 
 ### Web 模式
@@ -172,6 +191,34 @@ docs 文件
 详细改造说明见：
 
 [note/qwen-agent-es-rag-guide.md](note/qwen-agent-es-rag-guide.md)
+
+## Tavily MCP 配置
+
+Tavily MCP 在 `qwen_agent_multi_files_config.py` 中按 `.env` 开关动态加入 Qwen Agent 的 `function_list`。
+
+默认：
+
+```python
+tools = []
+```
+
+启用后会追加：
+
+```python
+{
+    "mcpServers": {
+        "tavily-mcp": {
+            "command": "npx",
+            "args": ["-y", "tavily-mcp@0.1.3"],
+            "env": {
+                "TAVILY_API_KEY": "...",
+            },
+        },
+    },
+}
+```
+
+这样项目仍以本地保险文档 QA 为主，Tavily MCP 只作为需要联网搜索时的补充工具。
 
 ## 实现亮点
 
