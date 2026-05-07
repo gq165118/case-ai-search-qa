@@ -7,3 +7,9 @@ venv/
 
 __pycache__/
 *.py[cod]
+
+# Qwen Agent 运行生成目录
+workspace/
+
+# 本地 Codex 项目规则文件
+AGENTS.md
