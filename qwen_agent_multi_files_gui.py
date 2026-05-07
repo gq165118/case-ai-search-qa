@@ -37,11 +37,50 @@ def _build_rag_panel_html(rag_label: str, rag_info: dict | None) -> str:
 # add end
 
 
-# modified by gq [2026-05-07：首屏增加 ES 状态标签和检索后端面板，便于确认当前使用 Elasticsearch]
-def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_info: dict | None = None) -> str:
+# add by gq [2026-05-08：在 GUI 中展示 Tavily MCP 联网搜索启用状态]
+def _build_tavily_panel_html(tavily_info: dict | None) -> str:
+    info = tavily_info or {}
+    enabled = bool(info.get('enabled'))
+    has_key = bool(info.get('has_key'))
+    badge = html.escape(str(info.get('badge') or 'WEB'))
+    status = '已启用' if enabled else '未启用'
+    status_class = 'online' if enabled else 'offline'
+    command = html.escape(str(info.get('command') or '-'))
+    package = html.escape(str(info.get('package') or '-'))
+    mode = html.escape(str(info.get('mode') or '-'))
+    key_status = '已配置' if has_key else '未配置'
+    return f'''
+          <div class="backend-summary {status_class}">
+            <span class="backend-badge">{badge}</span>
+            <div>
+              <strong>Tavily MCP：{status}</strong>
+              <p>仅在模型实际调用 Tavily 工具时才会联网搜索。</p>
+            </div>
+          </div>
+          <dl class="backend-list">
+            <div><dt>模式</dt><dd>{mode}</dd></div>
+            <div><dt>Key</dt><dd>{key_status}</dd></div>
+            <div><dt>命令</dt><dd>{command}</dd></div>
+            <div><dt>包</dt><dd>{package}</dd></div>
+          </dl>
+          <div id="web-search-state" class="web-search-state {status_class}">本轮尚未开始。</div>'''
+# add end
+
+
+# modified by gq [2026-05-08：首屏增加 ES 状态和 Tavily MCP 状态，便于确认检索来源]
+def _build_page_html(doc_count: int,
+                     examples: list[str],
+                     rag_label: str,
+                     rag_info: dict | None = None,
+                     tavily_info: dict | None = None) -> str:
     rag_badge = html.escape(str((rag_info or {}).get('badge') or 'RAG'))
     rag_backend = html.escape(str((rag_info or {}).get('backend') or rag_label))
     rag_panel_html = _build_rag_panel_html(rag_label, rag_info)
+    tavily_panel_html = _build_tavily_panel_html(tavily_info)
+    tavily_enabled = bool((tavily_info or {}).get('enabled'))
+    tavily_badge = html.escape(str((tavily_info or {}).get('badge') or 'WEB'))
+    tavily_status = 'Tavily 已启用' if tavily_enabled else 'Tavily 未启用'
+    tavily_status_class = 'status-web-on' if tavily_enabled else 'status-web-off'
     quick_buttons = ''.join(
         f'<button type="button" class="quick-question">{html.escape(question)}</button>'
         for question in examples
@@ -63,6 +102,8 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
     .status {{ display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; font-size: 13px; white-space: nowrap; }}
     .status-doc {{ color: #14804a; background: #eaf7ef; border: 1px solid #c9ead5; }}
     .status-rag {{ color: #1849a9; background: #eef4ff; border: 1px solid #c7d7fe; }}
+    .status-web-on {{ color: #9f1239; background: #fff1f2; border: 1px solid #fecdd3; }}
+    .status-web-off {{ color: #667085; background: #f8fafc; border: 1px solid #d8dee9; }}
     .status-badge {{ display: inline-grid; place-items: center; min-width: 28px; height: 22px; padding: 0 6px; border-radius: 5px; color: #fff; background: #2557d6; font-weight: 800; font-size: 12px; }}
     .main-grid {{ display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: stretch; }}
     .chat {{ min-height: 520px; max-height: 66vh; overflow-y: auto; background: #fff; border: 1px solid #dfe4ec; border-radius: 8px; padding: 18px; }}
@@ -70,12 +111,19 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
     .panel {{ background: #fff; border: 1px solid #dfe4ec; border-radius: 8px; padding: 14px; }}
     .panel h2 {{ margin: 0 0 10px; font-size: 15px; }}
     .backend-summary {{ display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: #f5f8ff; border: 1px solid #d6e4ff; border-radius: 8px; }}
+    .backend-summary.online {{ background: #fff1f2; border-color: #fecdd3; }}
+    .backend-summary.offline {{ background: #f8fafc; border-color: #d8dee9; }}
     .backend-summary p {{ margin: 4px 0 0; color: #475467; font-size: 12px; line-height: 1.45; word-break: break-all; }}
     .backend-badge {{ flex: 0 0 auto; display: inline-grid; place-items: center; min-width: 34px; height: 28px; padding: 0 7px; color: #fff; background: #2557d6; border-radius: 6px; font-size: 13px; font-weight: 800; }}
     .backend-list {{ display: grid; gap: 8px; margin: 12px 0 0; font-size: 12px; }}
     .backend-list div {{ display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; }}
     .backend-list dt {{ color: #667085; }}
     .backend-list dd {{ margin: 0; color: #172033; word-break: break-all; }}
+    .web-search-state {{ margin-top: 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.45; }}
+    .web-search-state.online {{ color: #9f1239; background: #fff1f2; border: 1px solid #fecdd3; }}
+    .web-search-state.offline {{ color: #475467; background: #f8fafc; border: 1px solid #d8dee9; }}
+    .web-search-state.called {{ color: #1849a9; background: #eef4ff; border: 1px solid #c7d7fe; }}
+    .web-search-state.completed {{ color: #14804a; background: #eaf7ef; border: 1px solid #c9ead5; }}
     .debug-list {{ margin: 0; padding-left: 18px; color: #475467; font-size: 13px; line-height: 1.6; }}
     .ref-item {{ border-top: 1px solid #edf0f5; padding-top: 10px; margin-top: 10px; }}
     .ref-source {{ font-weight: 700; color: #2557d6; font-size: 13px; }}
@@ -116,6 +164,7 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
       <div class="header-status">
         <div class="status status-doc">知识库：{doc_count} 个文件</div>
         <div class="status status-rag"><span class="status-badge">{rag_badge}</span>{rag_backend} 检索</div>
+        <div class="status {tavily_status_class}"><span class="status-badge">{tavily_badge}</span>{tavily_status}</div>
       </div>
     </header>
     <section class="main-grid">
@@ -124,6 +173,10 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
         <div class="panel">
           <h2>检索后端</h2>
 {rag_panel_html}
+        </div>
+        <div class="panel">
+          <h2>联网搜索</h2>
+{tavily_panel_html}
         </div>
         <div class="panel">
           <h2>调试过程</h2>
@@ -151,6 +204,7 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
     const clear = document.getElementById('clear');
     const debug = document.getElementById('debug');
     const refs = document.getElementById('refs');
+    const webSearchState = document.getElementById('web-search-state');
     const history = [];
 
     function render() {{
@@ -169,12 +223,32 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
     function resetDebug() {{
       debug.innerHTML = '';
       refs.innerHTML = '暂无参考文档。';
+      setWebSearchState('本轮尚未开始。', 'offline');
     }}
 
     function addLog(message) {{
       const item = document.createElement('li');
       item.textContent = message;
       debug.appendChild(item);
+    }}
+
+    function setWebSearchState(message, state) {{
+      if (!webSearchState) return;
+      webSearchState.textContent = message;
+      webSearchState.className = 'web-search-state ' + state;
+    }}
+
+    function renderWebSearch(event) {{
+      if (event.status === 'disabled') setWebSearchState('本轮未启用联网搜索，只使用本地文档检索。', 'offline');
+      if (event.status === 'enabled') setWebSearchState('Tavily MCP 已启用，等待模型判断是否需要联网。', 'online');
+      if (event.status === 'called') {{
+        setWebSearchState('正在调用联网搜索工具：' + event.tool, 'called');
+        addLog('联网搜索调用：' + event.tool);
+      }}
+      if (event.status === 'completed') {{
+        setWebSearchState('联网搜索已完成：' + event.tool, 'completed');
+        addLog('联网搜索完成：' + event.tool);
+      }}
     }}
 
     function renderRefs(items) {{
@@ -222,6 +296,7 @@ def _build_page_html(doc_count: int, examples: list[str], rag_label: str, rag_in
             const event = JSON.parse(chunk.slice(6));
             if (event.type === 'log') addLog(event.message);
             if (event.type === 'refs') renderRefs(event.items);
+            if (event.type === 'web_search') renderWebSearch(event);
             if (event.type === 'answer') {{
               history[history.length - 1].content = event.content;
               render();
@@ -265,9 +340,10 @@ def run_web_app(event_factory,
                 port: int = 7860,
                 examples=None,
                 rag_label: str = '默认检索',
-                rag_info: dict | None = None):
+                rag_info: dict | None = None,
+                tavily_info: dict | None = None):
     examples = examples or DEFAULT_EXAMPLES
-    page_html = _build_page_html(doc_count, examples, rag_label, rag_info)
+    page_html = _build_page_html(doc_count, examples, rag_label, rag_info, tavily_info)
 
     class QAHandler(BaseHTTPRequestHandler):
         def do_GET(self):

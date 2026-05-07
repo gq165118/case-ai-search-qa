@@ -7,6 +7,7 @@ from qwen_agent_multi_files_config import (
     load_doc_files,
     rag_cfg,
     system_instruction,
+    tavily_mcp_info,
     tools,
 )
 
@@ -42,6 +43,42 @@ def assistant_answer_text(response_messages) -> str:
 # add end
 
 
+# add by gq [2026-05-08：识别 Tavily MCP 工具调用，便于 GUI 展示是否发生联网搜索]
+def _message_function_name(message) -> str:
+    function_call = message.get('function_call') if isinstance(message, dict) else getattr(message, 'function_call', None)
+    if not function_call:
+        return ''
+    if isinstance(function_call, dict):
+        return function_call.get('name', '') or ''
+    return getattr(function_call, 'name', '') or ''
+
+
+def _message_role_name(message) -> tuple[str, str]:
+    if isinstance(message, dict):
+        return message.get('role', '') or '', message.get('name', '') or ''
+    return getattr(message, 'role', '') or '', getattr(message, 'name', '') or ''
+
+
+def _is_tavily_tool_name(tool_name: str) -> bool:
+    return 'tavily' in (tool_name or '').lower()
+
+
+def _tavily_tool_events(response_messages, seen_tool_calls: set[str], seen_tool_results: set[str]) -> list[dict]:
+    events = []
+    for message in response_messages:
+        function_name = _message_function_name(message)
+        if _is_tavily_tool_name(function_name) and function_name not in seen_tool_calls:
+            seen_tool_calls.add(function_name)
+            events.append({'type': 'web_search', 'status': 'called', 'tool': function_name})
+
+        role, name = _message_role_name(message)
+        if role == 'function' and _is_tavily_tool_name(name) and name not in seen_tool_results:
+            seen_tool_results.add(name)
+            events.append({'type': 'web_search', 'status': 'completed', 'tool': name})
+    return events
+# add end
+
+
 # add by gq [2026-05-07：将检索结果同时用于参考展示和答案生成，避免重复检索]
 def retrieve_reference_docs(bot: Assistant, messages: list[dict]) -> tuple[str, list[dict]]:
     last = None
@@ -72,6 +109,13 @@ def run_qa_events(bot: Assistant, query: str, history: list[dict]):
 
     yield {'type': 'log', 'message': '收到问题，开始准备检索。'}
     yield {'type': 'log', 'message': f'当前知识库文件数：{len(load_doc_files())}'}
+    tavily_info = tavily_mcp_info()
+    if tavily_info['enabled']:
+        yield {'type': 'web_search', 'status': 'enabled', 'tool': 'Tavily MCP'}
+        yield {'type': 'log', 'message': '联网搜索：Tavily MCP 已启用，模型仅在需要时调用。'}
+    else:
+        yield {'type': 'web_search', 'status': 'disabled', 'tool': 'Tavily MCP'}
+        yield {'type': 'log', 'message': '联网搜索：未启用 Tavily MCP，本轮只使用本地文档检索。'}
     if rag_cfg.get('rag_backend') == 'elasticsearch':
         for message in es_debug_status():
             yield {'type': 'log', 'message': message}
@@ -86,7 +130,11 @@ def run_qa_events(bot: Assistant, query: str, history: list[dict]):
 
         yield {'type': 'log', 'message': '开始调用模型生成回答。'}
         printed_answer = ''
+        seen_tool_calls = set()
+        seen_tool_results = set()
         for response in bot.run(messages=messages, knowledge=knowledge, lang='zh'):
+            for event in _tavily_tool_events(response, seen_tool_calls, seen_tool_results):
+                yield event
             answer_text = assistant_answer_text(response)
             if answer_text and answer_text != printed_answer:
                 printed_answer = answer_text

@@ -1,7 +1,7 @@
 import argparse
 import logging
 
-from qwen_agent_multi_files_config import load_doc_files, rag_backend_info, rag_backend_label
+from qwen_agent_multi_files_config import load_doc_files, rag_backend_info, rag_backend_label, tavily_mcp_info
 from qwen_agent_multi_files_gui import run_web_app  # add by gq [2026-05-07: move GUI display layer to a separate module]
 from qwen_agent_multi_files_service import init_agent_service, run_qa_events, run_tui_demo
 
@@ -26,6 +26,7 @@ def app_gui():
         doc_count=len(load_doc_files()),
         rag_label=rag_backend_label(),
         rag_info=rag_backend_info(),
+        tavily_info=tavily_mcp_info(),
     )
 
 

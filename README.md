@@ -122,6 +122,8 @@ Tavily MCP 通过 `npx -y tavily-mcp@0.1.3` 启动，因此本机需要安装 No
 TAVILY_MCP_COMMAND=C:\Program Files\nodejs\npx.cmd
 ```
 
+GUI 右侧会显示“联网搜索”面板：如果只是启用了 Tavily MCP，会显示“等待模型判断是否需要联网”；只有当调试过程出现“联网搜索调用/联网搜索完成”时，才表示本轮真的使用了 Tavily 联网搜索。
+
 ## 运行项目
 
 ### Web 模式

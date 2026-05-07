@@ -129,6 +129,22 @@ def _tavily_mcp_tool_config() -> dict | None:
     }
 
 
+# add by gq [2026-05-08：给 GUI 和调试日志提供 Tavily MCP 启用状态]
+def tavily_mcp_info() -> dict:
+    enabled = _truthy_env('ENABLE_TAVILY_MCP')
+    has_key = bool((os.getenv('TAVILY_API_KEY') or '').strip())
+    return {
+        'enabled': enabled,
+        'has_key': has_key,
+        'backend': 'Tavily MCP',
+        'badge': 'WEB',
+        'mode': 'ENABLE_TAVILY_MCP=true' if enabled else 'ENABLE_TAVILY_MCP=false',
+        'command': _resolve_tavily_mcp_command() if enabled else '-',
+        'package': 'tavily-mcp@0.1.3',
+    }
+# add end
+
+
 tools = []
 _tavily_mcp_cfg = _tavily_mcp_tool_config()
 if _tavily_mcp_cfg:
