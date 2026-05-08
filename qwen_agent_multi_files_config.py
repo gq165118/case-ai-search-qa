@@ -175,6 +175,20 @@ rag_cfg = {
         "port": 9200,
         "index_name": "qwen_agent_rag_idx",
     },
+    # add by gq [2026-05-08：增加 text-embedding-v3 向量召回配置，和 BM25 结果做融合重排]
+    "embedding": {
+        "enabled": True,
+        "model": (os.getenv('AGICTO_EMBEDDING_MODEL') or 'text-embedding-v3').strip(),
+        "base_url": agicto_openai_base_url(),
+        "api_key": _agicto_key,
+        "vector_field": "embedding",
+        "batch_size": 8,
+        "max_chars": 6000,
+        "bm25_candidate_size": 80,
+        "vector_candidate_size": 80,
+        "rrf_k": 60,
+    },
+    # add end
 }
 
 
@@ -208,13 +222,15 @@ def rag_backend_info() -> dict:
             'badge': 'ES',
             'address': base_url,
             'index_name': index_name,
-            'mode': 'rag_cfg.rag_backend = elasticsearch',
+            'mode': 'BM25 + text-embedding-v3 向量融合',
             'label': rag_backend_label(),
             'status': status,
             'doc_count': live_doc_count if live_doc_count is not None else state_doc_count,
             'state_status': state_status,
             'state_doc_count': state_doc_count,
             'docs_signature': state.get('docs_signature', '') if state else '',
+            'embedding_enabled': rag_cfg.get('embedding', {}).get('enabled', False),
+            'embedding_model': rag_cfg.get('embedding', {}).get('model', '-'),
             'source': 'live_es' if live_doc_count is not None else 'local_state',
         }
     return {
@@ -258,6 +274,7 @@ def es_debug_status() -> list[str]:
     if state:
         messages.append(f"ES 索引状态：{state.get('status', 'unknown')}")
         messages.append(f"ES 索引文件数：{state.get('doc_count', 0)}")
+        messages.append(f"ES 向量模型：{state.get('embedding_model', '未记录') or '未启用'}")
     else:
         messages.append('ES 索引状态：未生成本地状态文件')
     return messages

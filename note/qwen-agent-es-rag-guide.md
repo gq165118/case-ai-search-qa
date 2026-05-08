@@ -47,8 +47,9 @@ docs/ 本地文档
   -> Memory 发现 rag_backend = elasticsearch
   -> 使用 ESRetrievalTool 替换默认 retrieval
   -> scripts/index_docs_to_es.py 独立写入 ES
-  -> ElasticsearchSearcher 只负责 ES 检索
-  -> ES match / match_phrase 检索相关 chunk
+  -> ElasticsearchSearcher 写入 content + text-embedding-v3 向量
+  -> ES BM25 + dense_vector 向量召回
+  -> RRF 融合重排相关 chunk
   -> Qwen Agent 格式化 knowledge
   -> LLM 基于召回内容回答
 ```
@@ -152,6 +153,11 @@ rag_cfg = {
         "port": 9200,
         "index_name": "qwen_agent_rag_idx",
     },
+    "embedding": {
+        "enabled": True,
+        "model": "text-embedding-v3",
+        "vector_field": "embedding",
+    },
 }
 ```
 
@@ -165,6 +171,9 @@ rag_cfg = {
 | `es.host` | ES 服务地址 |
 | `es.port` | ES 服务端口 |
 | `es.index_name` | 文档 chunk 写入的 ES 索引 |
+| `embedding.enabled` | 是否启用向量召回 |
+| `embedding.model` | 向量模型，本项目默认 `text-embedding-v3` |
+| `embedding.vector_field` | ES 中保存向量的字段名 |
 
 ### 6.2 初始化 Assistant 时传入 `rag_cfg`
 
@@ -228,18 +237,31 @@ search_results = self.searcher.search(query, max_ref_token=self.max_ref_token)
 3. 优先尝试 IK 中文分词器。
 4. 没有 IK 时回退到标准分词器。
 5. 使用 `DocParser` 解析文件并分块。
-6. 使用 hash 生成 chunk ID，避免重复写入。
-7. 使用 `_mget` 检查已存在 chunk。
-8. 使用 `helpers.bulk` 批量写入 ES。
-9. 使用 `match`、`match_phrase` 检索。
+6. 使用 `text-embedding-v3` 为 chunk 生成向量。
+7. 使用 hash 生成 chunk ID，避免重复写入。
+8. 使用 `_mget` 检查已存在 chunk。
+9. 使用 `helpers.bulk` 批量写入 ES。
+10. 使用 BM25 和向量召回。
+11. 使用 RRF 融合重排候选 chunk。
 
-当前查询方式：
+当前 BM25 查询方式：
 
 ```python
 "should": [
     {"match": {"content": {"query": query, "boost": 2}}},
     {"match_phrase": {"content": {"query": query, "boost": 3}}},
 ]
+```
+
+向量查询方式：
+
+```python
+"knn": {
+    "field": "embedding",
+    "query_vector": query_vector,
+    "k": 80,
+    "num_candidates": 240,
+}
 ```
 
 ## 7. GUI 现在如何体现 ES 检索
@@ -252,7 +274,8 @@ search_results = self.searcher.search(query, max_ref_token=self.max_ref_token)
 ES Elasticsearch 检索
 地址：http://localhost:9200
 索引：qwen_agent_rag_idx
-模式：rag_cfg.rag_backend = elasticsearch
+模式：BM25 + text-embedding-v3 向量融合
+向量：text-embedding-v3
 ```
 
 右侧调试过程在提问时也会输出：
@@ -306,6 +329,8 @@ Elasticsearch 官方文档也强调 bulk API 的批量大小需要按业务压�
 3. 文件变更时通过文档签名做增量判断。
 4. GUI 显示索引状态、文档数和签名，方便确认当前知识库是否已更新。
 5. ES mapping 只保留正文检索字段，避免 `content.keyword` 这类长文本子字段带来的写入风险。
+6. 增加 `text-embedding-v3` 向量字段，支持口语化和语义问题召回。
+7. 使用 RRF 将 BM25 与向量召回结果融合重排。
 
 推荐结构：
 
@@ -352,11 +377,21 @@ qwen_agent_multi_files_gui.py     # 展示 ES 状态、索引名、文档块数�
 2. 需要强语义匹配。
 3. 需要跨多个文档做复杂推理。
 
-### 10.3 后续增加向量检索
+### 10.3 当前 ES 混合检索
 
-如果用户问题越来越口语化，可以考虑向量检索。
+如果用户问题越来越口语化，只靠 BM25 容易漏召回。本项目当前已经增加向量召回：
 
-可选方向：
+```text
+用户问题
+  -> ES BM25 召回 topN
+  -> text-embedding-v3 生成查询向量
+  -> ES dense_vector 召回 topN
+  -> RRF 融合重排
+  -> 拼入 Qwen Agent knowledge
+  -> LLM 回答
+```
+
+后续仍可继续比较不同向量库或向量字段方案：
 
 | 方案 | 特点 |
 |---|---|
@@ -366,16 +401,16 @@ qwen_agent_multi_files_gui.py     # 展示 ES 状态、索引名、文档块数�
 | Milvus | 更偏生产级向量库 |
 | Elasticsearch dense_vector | 可以在 ES 内做关键词 + 向量混合 |
 
-### 10.4 ES + 向量 + Rerank
+### 10.4 ES + 向量 + 专门 Reranker
 
 更完整的生产级检索链路可以是：
 
 ```text
 用户问题
   -> ES BM25 召回 topN
-  -> 向量检索召回 topN
+  -> text-embedding-v3 向量检索召回 topN
   -> 合并去重
-  -> reranker 重排
+  -> 专门 reranker 模型重排
   -> 取 topK
   -> 拼入 Qwen Agent knowledge
   -> LLM 回答
@@ -453,7 +488,7 @@ scripts/index_docs_to_es.py
 1. **保留 Qwen Agent**：继续使用 `Assistant`、Memory、knowledge 注入和模型回答。
 2. **增加 ES 后端**：通过 `rag_cfg.rag_backend = elasticsearch` 切换底层 retrieval。
 3. **增强可观察性**：GUI 明确展示 ES 地址、索引名、检索模式和调试过程。
-4. **为规模化做准备**：后续可以做离线索引、metadata、向量混合和 rerank。
+4. **为规模化做准备**：后续可以做 metadata、专门 reranker 和检索评测。
 
 当前最推荐的下一步是：**把 ES 索引流程从问答流程中拆出来，做成独立离线索引脚本。**
 

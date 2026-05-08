@@ -1,6 +1,7 @@
 # 门票助手 assistant_ticket_bot-3.py 运行所需（路径已改为全英文目录）
 python-dotenv>=1.0.0
 qwen-agent[rag]>=0.0.25  # modified by gq [2026-05-06：文档问答需要 RAG 检索依赖]
+openai>=1.0.0  # add by gq [2026-05-08：调用 AGICTO OpenAI 兼容 text-embedding-v3 生成向量]
 dashscope
 pandas
 sqlalchemy

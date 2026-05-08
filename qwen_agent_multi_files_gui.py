@@ -24,6 +24,7 @@ def _build_rag_panel_html(rag_label: str, rag_info: dict | None) -> str:
     status = html.escape(str(info.get('status') or '-'))
     doc_count = html.escape(str(info.get('doc_count') or '0'))
     signature = html.escape(str((info.get('docs_signature') or '')[:10] or '-'))
+    embedding_model = html.escape(str(info.get('embedding_model') or '-'))
     return f'''
           <div class="backend-summary">
             <span class="backend-badge">{badge}</span>
@@ -39,6 +40,7 @@ def _build_rag_panel_html(rag_label: str, rag_info: dict | None) -> str:
             <div><dt>状态</dt><dd>{status}</dd></div>
             <div><dt>文件</dt><dd>{doc_count}</dd></div>
             <div><dt>签名</dt><dd>{signature}</dd></div>
+            <div><dt>向量</dt><dd>{embedding_model}</dd></div>
           </dl>'''
 # add end
 

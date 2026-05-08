@@ -6,7 +6,8 @@
 
 - **多文档问答**：自动加载 `docs/` 目录中的 `.txt`、`.pdf` 保险文档。
 - **Qwen Agent RAG**：继续使用 Qwen Agent 组织文件、检索结果和模型回答。
-- **Elasticsearch 检索后端**：通过 `rag_cfg.rag_backend = elasticsearch` 将底层 retrieval 扩展到 ES。
+- **Elasticsearch 混合检索后端**：通过 `rag_cfg.rag_backend = elasticsearch` 将底层 retrieval 扩展为 BM25 + 向量融合检索。
+- **text-embedding-v3 向量召回**：索引阶段写入 chunk embedding，查询阶段补充语义召回并做 RRF 融合重排。
 - **Tavily MCP 可选联网搜索**：配置 `TAVILY_API_KEY` 后，可在 GUI 中按本轮开关允许 Qwen Agent 调用 Tavily MCP。
 - **引用可追溯**：Web 页面展示本次回答参考的文档和片段。
 - **过程可观测**：展示问题处理、ES 状态、文档检索、模型生成等关键步骤。
@@ -199,6 +200,12 @@ rag_cfg = {
         "port": 9200,
         "index_name": "qwen_agent_rag_idx",
     },
+    "embedding": {
+        "enabled": True,
+        "model": "text-embedding-v3",
+        "base_url": "https://api.agicto.cn/v1",
+        "vector_field": "embedding",
+    },
 }
 ```
 
@@ -207,10 +214,26 @@ rag_cfg = {
 ```text
 docs 文件
   -> DocParser 解析分块
+  -> text-embedding-v3 生成 chunk 向量
   -> Elasticsearch bulk 写入
-  -> ES match / match_phrase 检索
+  -> ES BM25 + dense_vector 向量召回
+  -> RRF 融合重排
   -> Qwen Agent knowledge
   -> LLM 回答
+```
+
+向量模型默认复用 AGICTO OpenAI 兼容配置：
+
+```text
+AGICTO_BASE_URL=https://api.agicto.cn
+AGICTO_API_KEY=your_api_key
+AGICTO_EMBEDDING_MODEL=text-embedding-v3
+```
+
+新增或调整向量 mapping 后，建议重建索引：
+
+```powershell
+python .\scripts\index_docs_to_es.py --recreate
 ```
 
 详细改造说明见：
@@ -265,7 +288,7 @@ GUI 中会展示 ES 地址、索引名和运行模式；提问后调试过程会
 
 ### 5. 为规模化检索预留空间
 
-当前 ES 接入适合从少量文档 demo 走向更大知识库；后续可以继续做离线索引、metadata 过滤、向量检索和 rerank。
+当前 ES 接入适合从少量文档 demo 走向更大知识库；已经支持 BM25 + text-embedding-v3 向量召回 + RRF 融合重排，后续可以继续做 metadata 过滤和更专业的 reranker。
 
 ## 开发验证
 
@@ -282,5 +305,5 @@ python -m py_compile .\qwen-agent-multi-files.py .\qwen_agent_multi_files_config
 - 为离线索引增加更完整的增量更新、失败重试和索引版本治理。
 - 为每个 chunk 增加 metadata，例如险种、产品名、文件类型、更新时间。
 - 增加更细粒度的引用定位，例如页码、段落编号或文件内位置。
-- 增加向量检索和 rerank，提升口语化问题和语义问题的召回质量。
-- 建立评测集，对比 Qwen Agent 默认检索、ES 检索、ES + 向量检索效果。
+- 接入专门 reranker 模型，对 BM25 + 向量召回后的候选片段做二次精排。
+- 建立评测集，对比 Qwen Agent 默认检索、ES BM25 检索、ES 混合检索效果。
