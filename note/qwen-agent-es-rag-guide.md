@@ -468,18 +468,46 @@ scripts/index_docs_to_es.py
 
 ### 方向 D：评测集
 
-建立 `eval_questions.jsonl`：
+当前项目已经建立轻量评测集：
+
+```text
+eval/eval_questions.jsonl
+```
+
+每行是一道问题和期望命中的文档来源：
 
 ```json
 {"question": "上下班途中事故算不算？", "expected_source": "2-雇主责任险.txt"}
 ```
 
-用于比较：
+评测脚本：
 
-1. 原始 Qwen Agent 检索。
-2. 当前 ES 检索。
-3. ES + 向量。
-4. ES + rerank。
+```powershell
+python .\scripts\evaluate_retrieval.py
+```
+
+默认比较：
+
+1. ES BM25。
+2. ES 向量。
+3. ES 混合召回 + RRF 重排。
+
+如果要同时比较原始 Qwen Agent 检索：
+
+```powershell
+python .\scripts\evaluate_retrieval.py --modes qwen_default es_bm25 es_vector es_hybrid
+```
+
+输出指标：
+
+1. `Hit@K`：前 K 个召回来源是否命中预期文档。
+2. `MRR`：命中文档排得越靠前，分数越高。
+
+详细结果写入：
+
+```text
+workspace/eval_retrieval_results.json
+```
 
 ## 12. 本项目当前结论
 

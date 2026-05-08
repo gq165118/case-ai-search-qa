@@ -295,10 +295,50 @@ GUI 中会展示 ES 地址、索引名和运行模式；提问后调试过程会
 修改 Python 脚本后，可先进行语法检查：
 
 ```powershell
-python -m py_compile .\qwen-agent-multi-files.py .\qwen_agent_multi_files_config.py .\qwen_agent_multi_files_service.py .\qwen_agent_multi_files_gui.py .\qwen_agent\memory\memory.py .\qwen_agent\tools\es_retrieval.py .\qwen_agent\searcher\es_index_state.py .\qwen_agent\searcher\elasticsearch_searcher.py .\scripts\index_docs_to_es.py
+python -m py_compile .\qwen-agent-multi-files.py .\qwen_agent_multi_files_config.py .\qwen_agent_multi_files_service.py .\qwen_agent_multi_files_gui.py .\qwen_agent\memory\memory.py .\qwen_agent\tools\es_retrieval.py .\qwen_agent\searcher\es_index_state.py .\qwen_agent\searcher\elasticsearch_searcher.py .\scripts\index_docs_to_es.py .\scripts\evaluate_retrieval.py
 ```
 
 运行 Web 或终端模式会发起真实模型调用；检索会访问本地 ES，请确保 `.env`、Elasticsearch 和索引都已正确配置。
+
+## 检索评测
+
+项目内置了一份轻量评测集：
+
+```text
+eval/eval_questions.jsonl
+```
+
+每行是一道问题和期望命中的文档来源，例如：
+
+```json
+{"question": "上下班途中事故算不算？", "expected_source": "2-雇主责任险.txt"}
+```
+
+运行评测：
+
+```powershell
+python .\scripts\evaluate_retrieval.py
+```
+
+默认比较：
+
+```text
+ES BM25
+ES 向量
+ES 混合召回 + RRF 重排
+```
+
+如果也想比较 Qwen Agent 默认检索：
+
+```powershell
+python .\scripts\evaluate_retrieval.py --modes qwen_default es_bm25 es_vector es_hybrid
+```
+
+评测结果会输出 Hit@K 和 MRR，并将明细写入：
+
+```text
+workspace/eval_retrieval_results.json
+```
 
 ## 后续优化方向
 
@@ -306,4 +346,4 @@ python -m py_compile .\qwen-agent-multi-files.py .\qwen_agent_multi_files_config
 - 为每个 chunk 增加 metadata，例如险种、产品名、文件类型、更新时间。
 - 增加更细粒度的引用定位，例如页码、段落编号或文件内位置。
 - 接入专门 reranker 模型，对 BM25 + 向量召回后的候选片段做二次精排。
-- 建立评测集，对比 Qwen Agent 默认检索、ES BM25 检索、ES 混合检索效果。
+- 扩充评测集，增加更多口语化、同义改写和难例问题。

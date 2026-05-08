@@ -1,0 +1,10 @@
+{"id": "employer_commute_accident", "question": "上下班途中发生交通事故算不算雇主责任险的保障？", "expected_source": "2-雇主责任险.txt", "note": "考察上下班途中事故责任"}
+{"id": "employer_vs_group_accident", "question": "雇主责任险和团体意外险有什么区别？", "expected_source": "2-雇主责任险.txt", "note": "考察产品区别"}
+{"id": "temporary_worker_claim", "question": "没有签劳动合同的临时工出事能赔吗？", "expected_source": "2-雇主责任险.txt", "note": "考察雇员定义和临时工"}
+{"id": "amazon_insurance_requirement", "question": "亚马逊卖家什么时候必须买商业综合责任保险？", "expected_source": "1-平安商业综合责任保险（亚马逊）.txt", "note": "考察亚马逊保险要求"}
+{"id": "amazon_claim_process", "question": "亚马逊商业综合责任险出险后理赔流程是什么？", "expected_source": "1-平安商业综合责任保险（亚马逊）.txt", "note": "考察亚马逊理赔流程"}
+{"id": "construction_third_party", "question": "施工过程中造成第三者受伤，施工保能不能覆盖？", "expected_source": "5-施工保.txt", "note": "考察施工第三者责任"}
+{"id": "construction_qualification", "question": "投保施工保对施工资质有什么要求？", "expected_source": "5-施工保.txt", "note": "考察施工保投保要求"}
+{"id": "property_all_risk_claim", "question": "财产一切险线上理赔流程怎么走？", "expected_source": "6-财产一切险.txt", "note": "考察财产险理赔流程"}
+{"id": "group_accident_waiting_period", "question": "团体综合意外险里疾病身故有没有等待期？", "expected_source": "3-平安企业团体综合意外险.txt", "note": "考察疾病身故等待期"}
+{"id": "medical_rescue_hotline", "question": "紧急医疗救援服务或者住院垫付应该拨打哪个电话？", "expected_source": "3-平安企业团体综合意外险.txt", "note": "考察救援服务热线"}
