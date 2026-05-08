@@ -7,6 +7,7 @@ from pathlib import Path
 import json5
 from dotenv import load_dotenv
 from qwen_agent.tools.base import BaseTool, register_tool
+from qwen_agent.searcher.es_index_state import load_es_index_state
 
 
 # modified by gq [2026-05-06：从项目根目录加载 .env，与脚本同目录]
@@ -191,13 +192,30 @@ def rag_backend_info() -> dict:
         host = es_cfg.get('host', 'http://localhost')
         port = es_cfg.get('port', 9200)
         index_name = es_cfg.get('index_name', 'qwen_agent_rag_idx')
+        base_url = f'{host}:{port}'
+        live_doc_count = _query_es_doc_count(base_url, index_name)
+        state = load_es_index_state()
+        state_status = state.get('status', '未生成本地状态文件') if state else '未生成本地状态文件'
+        state_doc_count = state.get('doc_count', 0) if state else 0
+        if live_doc_count is not None and live_doc_count > 0:
+            status = '已索引（ES 现有数据）'
+        elif state:
+            status = state_status
+        else:
+            status = '未索引'
         return {
             'backend': 'Elasticsearch',
             'badge': 'ES',
-            'address': f'{host}:{port}',
+            'address': base_url,
             'index_name': index_name,
             'mode': 'rag_cfg.rag_backend = elasticsearch',
             'label': rag_backend_label(),
+            'status': status,
+            'doc_count': live_doc_count if live_doc_count is not None else state_doc_count,
+            'state_status': state_status,
+            'state_doc_count': state_doc_count,
+            'docs_signature': state.get('docs_signature', '') if state else '',
+            'source': 'live_es' if live_doc_count is not None else 'local_state',
         }
     return {
         'backend': '默认内存检索',
@@ -235,5 +253,21 @@ def es_debug_status() -> list[str]:
         messages.append(f"ES 当前索引文档块数：{count.get('count', 0)}")
     except Exception:
         messages.append('ES 当前索引文档块数：索引尚未创建，将在首次检索时创建')
+
+    state = load_es_index_state()
+    if state:
+        messages.append(f"ES 索引状态：{state.get('status', 'unknown')}")
+        messages.append(f"ES 索引文件数：{state.get('doc_count', 0)}")
+    else:
+        messages.append('ES 索引状态：未生成本地状态文件')
     return messages
 # mod end
+
+
+def _query_es_doc_count(base_url: str, index_name: str) -> int | None:
+    try:
+        with urllib.request.urlopen(f'{base_url}/{index_name}/_count', timeout=3) as response:
+            count = json5.loads(response.read().decode('utf-8'))
+        return int(count.get('count', 0))
+    except Exception:
+        return None

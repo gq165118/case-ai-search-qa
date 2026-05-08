@@ -34,8 +34,10 @@
 ├── qwen_agent_multi_files_gui.py          # 本地 Web GUI 展示层
 ├── qwen_agent/                            # 本地 Qwen Agent 源码，加入 ES retrieval 扩展
 │   ├── memory/memory.py                   # 根据 rag_backend 切换默认检索或 ES 检索
-│   ├── tools/es_retrieval.py              # ES retrieval 工具
+│   ├── tools/es_retrieval.py              # ES retrieval 与离线索引工具
+│   ├── searcher/es_index_state.py         # ES 索引状态文件读写和文档签名
 │   └── searcher/elasticsearch_searcher.py # ES 连接、索引、搜索
+├── scripts/index_docs_to_es.py            # docs 离线写入 ES 的索引脚本
 ├── scripts/start-local-elasticsearch.ps1  # 本地 ES 启动辅助脚本
 ├── note/qwen-agent-es-rag-guide.md        # 本项目 Qwen Agent + ES 改造总结
 ├── docs/                                  # 本地保险文档知识库
@@ -123,6 +125,28 @@ TAVILY_MCP_COMMAND=C:\Program Files\nodejs\npx.cmd
 
 GUI 右侧会显示“联网搜索”面板和“本轮联网”开关：开关关闭时本轮只使用本地文档检索；开关打开后，模型仍只会在需要时调用 Tavily。只有当调试过程出现“联网搜索调用/联网搜索完成”时，才表示本轮真的使用了 Tavily 联网搜索。
 
+### 6. 建立 ES 索引
+
+当前版本已经将“写入索引”和“在线问答”拆开：问答时只查询 ES，不再重复解析 `docs/`。
+
+首次运行或 `docs/` 文件变化后，先执行：
+
+```powershell
+python .\scripts\index_docs_to_es.py
+```
+
+只想查看待索引文件，不写入 ES：
+
+```powershell
+python .\scripts\index_docs_to_es.py --dry-run
+```
+
+如果 ES mapping 调整过，需要删除旧索引并重建：
+
+```powershell
+python .\scripts\index_docs_to_es.py --recreate
+```
+
 ## 运行项目
 
 ### Web 模式
@@ -178,13 +202,13 @@ rag_cfg = {
 }
 ```
 
-当前实现会在检索时确保 `docs/` 中的文件已经写入 ES：
+当前实现通过独立脚本先把 `docs/` 写入 ES，在线问答阶段只查询 ES：
 
 ```text
 docs 文件
   -> DocParser 解析分块
   -> Elasticsearch bulk 写入
-  -> ES match / match_phrase / wildcard 检索
+  -> ES match / match_phrase 检索
   -> Qwen Agent knowledge
   -> LLM 回答
 ```
@@ -248,14 +272,14 @@ GUI 中会展示 ES 地址、索引名和运行模式；提问后调试过程会
 修改 Python 脚本后，可先进行语法检查：
 
 ```powershell
-python -m py_compile .\qwen-agent-multi-files.py .\qwen_agent_multi_files_config.py .\qwen_agent_multi_files_service.py .\qwen_agent_multi_files_gui.py .\qwen_agent\memory\memory.py .\qwen_agent\tools\es_retrieval.py .\qwen_agent\searcher\elasticsearch_searcher.py
+python -m py_compile .\qwen-agent-multi-files.py .\qwen_agent_multi_files_config.py .\qwen_agent_multi_files_service.py .\qwen_agent_multi_files_gui.py .\qwen_agent\memory\memory.py .\qwen_agent\tools\es_retrieval.py .\qwen_agent\searcher\es_index_state.py .\qwen_agent\searcher\elasticsearch_searcher.py .\scripts\index_docs_to_es.py
 ```
 
-运行 Web 或终端模式会发起真实模型调用；首次检索还会访问本地 ES，请确保 `.env` 和 Elasticsearch 都已正确配置。
+运行 Web 或终端模式会发起真实模型调用；检索会访问本地 ES，请确保 `.env`、Elasticsearch 和索引都已正确配置。
 
 ## 后续优化方向
 
-- 将 ES 索引流程拆成独立离线脚本，避免每次问答都遍历 `docs/`。
+- 为离线索引增加更完整的增量更新、失败重试和索引版本治理。
 - 为每个 chunk 增加 metadata，例如险种、产品名、文件类型、更新时间。
 - 增加更细粒度的引用定位，例如页码、段落编号或文件内位置。
 - 增加向量检索和 rerank，提升口语化问题和语义问题的召回质量。

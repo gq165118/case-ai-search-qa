@@ -3,9 +3,11 @@ import os
 import json
 import hashlib
 import logging
+from pathlib import Path
 from elasticsearch import Elasticsearch, helpers
 from elasticsearch.exceptions import BadRequestError # 导入特定的异常
 from qwen_agent.tools.doc_parser import DocParser
+from qwen_agent.searcher.es_index_state import build_docs_signature, load_es_index_state, save_es_index_state
 
 # 为此模块设置一个日志记录器
 logger = logging.getLogger(__name__)
@@ -22,6 +24,7 @@ class ElasticsearchSearcher:
         self.user = es_cfg.get('user')
         self.password = es_cfg.get('password')
         self.index_name = es_cfg.get('index_name', 'qwen_agent_rag_idx')
+        self.index_state = load_es_index_state()
         
         # DocParser 用于解析和分块文档
         self.parser = DocParser(cfg=self.cfg)
@@ -32,6 +35,32 @@ class ElasticsearchSearcher:
             self._create_index_if_not_exists()
         else:
             logger.error("连接 Elasticsearch 失败。请检查您的配置、网络和 ES 服务状态。")
+
+    # add by gq [2026-05-08：收口 ES mapping，正文只保留 text 检索字段，避免长文本写入 content.keyword 失败]
+    def _index_properties(self, use_ik: bool = False) -> dict:
+        content_mapping = {"type": "text"}
+        if use_ik:
+            content_mapping.update({
+                "analyzer": "ik_max_word",
+                "search_analyzer": "ik_smart",
+            })
+        return {
+            "content": content_mapping,
+            "source": {"type": "keyword"},
+            "chunk_id": {"type": "integer"},
+            "token": {"type": "integer"},
+        }
+
+    def recreate_index(self):
+        if not self.client:
+            logger.error("Elasticsearch 客户端不可用，无法重建索引。")
+            return
+        if self.client.indices.exists(index=self.index_name):
+            logger.warning(f"正在删除旧索引 '{self.index_name}'，随后按当前 mapping 重建。")
+            self.client.indices.delete(index=self.index_name)
+        self._create_index_if_not_exists()
+        self.index_state = {}
+    # add end
 
     def _connect(self) -> Elasticsearch:
         """建立并返回到 Elasticsearch 的连接。"""
@@ -75,17 +104,7 @@ class ElasticsearchSearcher:
                         "number_of_replicas": 0,
                         "analysis": {"analyzer": {"default": {"type": "ik_max_word"}}},
                     },
-                    "mappings": {
-                        "properties": {
-                            "content": {
-                                "type": "text",
-                                "analyzer": "ik_max_word",
-                                "search_analyzer": "ik_smart",
-                                "fields": {"keyword": {"type": "keyword", "ignore_above": 32766}},
-                            },
-                            "source": {"type": "keyword"}
-                        }
-                    }
+                    "mappings": {"properties": self._index_properties(use_ik=True)}
                 }
                 
                 try:
@@ -101,12 +120,7 @@ class ElasticsearchSearcher:
                         # 回退配置：使用标准分词器
                         standard_index_settings = {
                             "settings": {"number_of_replicas": 0},
-                            "mappings": {
-                                "properties": {
-                                    "content": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 32766}}}, # 使用默认的标准分词器
-                                    "source": {"type": "keyword"}
-                                }
-                            }
+                            "mappings": {"properties": self._index_properties(use_ik=False)}
                         }
                         # 再次尝试使用标准配置创建
                         self.client.indices.create(index=self.index_name, body=standard_index_settings)
@@ -130,6 +144,10 @@ class ElasticsearchSearcher:
             return
             
         logger.info(f"开始处理 {len(files)} 个文件以进行索引...")
+        current_signature = build_docs_signature(files)
+        if self.index_state.get('docs_signature') == current_signature and self.index_state.get('index_name') == self.index_name:
+            logger.info("文档签名未变化，跳过重复索引。")
+            return
         chunks = self._get_chunks(files)
         logger.info(f"从文件中总共提取了 {len(chunks)} 个内容块。")
 
@@ -149,6 +167,7 @@ class ElasticsearchSearcher:
                 "_source": {
                     "content": chunk['content'],
                     "source": chunk['metadata']['source'],
+                    "chunk_id": chunk['metadata'].get('chunk_id', 0),
                     "token": chunk.get('token', 0)
                 }
             } for chunk in new_chunks]
@@ -158,10 +177,43 @@ class ElasticsearchSearcher:
                 logger.info(f"成功索引 {successes} 个新文档块。")
                 if errors:
                     logger.error(f"批量索引过程中发生 {len(errors)} 个错误。第一个错误详情: {errors[0]}")
+                    self.index_state = save_es_index_state({
+                        'status': 'failed',
+                        'index_name': self.index_name,
+                        'docs_signature': current_signature,
+                        'doc_files': [str(Path(file).resolve()) for file in files],
+                        'doc_count': len(files),
+                        'error_count': len(errors),
+                    })
+                    return
+                self.index_state = save_es_index_state({
+                    'status': 'indexed',
+                    'index_name': self.index_name,
+                    'docs_signature': current_signature,
+                    'doc_files': [str(Path(file).resolve()) for file in files],
+                    'doc_count': len(files),
+                })
             except helpers.BulkIndexError as e:
                 logger.error(f"批量索引时发生严重错误: {len(e.errors)} 个文档索引失败。")
         else:
             logger.info("所有文件内容均已在 Elasticsearch 中建立索引，无需更新。")
+            self.index_state = save_es_index_state({
+                'status': 'indexed',
+                'index_name': self.index_name,
+                'docs_signature': current_signature,
+                'doc_files': [str(Path(file).resolve()) for file in files],
+                'doc_count': len(files),
+            })
+
+    def index_state_summary(self) -> dict:
+        state = self.index_state if isinstance(self.index_state, dict) else {}
+        return {
+            'status': state.get('status', 'unknown'),
+            'index_name': state.get('index_name', self.index_name),
+            'doc_count': state.get('doc_count', 0),
+            'docs_signature': state.get('docs_signature', ''),
+            'doc_files': state.get('doc_files', []),
+        }
 
     def _get_chunks(self, files: list) -> list:
         """从文件列表中提取并返回所有文本块。"""
@@ -240,25 +292,21 @@ class ElasticsearchSearcher:
         
         logger.info(f"正在使用查询语句在 Elasticsearch 中搜索: '{query}'")
         
-        # 请求一批候选结果（例如 100 个），以便本地筛选
-        query_terms = [part for part in query.split() if part]
-        wildcard_should = [
-            {"wildcard": {"content.keyword": {"value": f"*{term}*", "boost": 0.5}}}
-            for term in query_terms[:8]
-        ]
+        # 请求一批候选结果（例如 100 个），以便本地筛选。
+        # modified by gq [2026-05-08：移除 content.keyword 通配检索，避免 mapping 为长文本创建 keyword 子字段]
         search_body = {
             "query": {
                 "bool": {
                     "should": [
                         {"match": {"content": {"query": query, "boost": 2}}},
                         {"match_phrase": {"content": {"query": query, "boost": 3}}},
-                        *wildcard_should,
                     ],
                     "minimum_should_match": 1,
                 }
             },
             "size": 100  
         }
+        # mod end
         
         try:
             response = self.client.search(index=self.index_name, body=search_body)

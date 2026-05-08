@@ -46,8 +46,9 @@ docs/ 本地文档
   -> Assistant(files=files, rag_cfg=rag_cfg)
   -> Memory 发现 rag_backend = elasticsearch
   -> 使用 ESRetrievalTool 替换默认 retrieval
-  -> ElasticsearchSearcher 解析文档并写入 ES
-  -> ES match / match_phrase / wildcard 检索相关 chunk
+  -> scripts/index_docs_to_es.py 独立写入 ES
+  -> ElasticsearchSearcher 只负责 ES 检索
+  -> ES match / match_phrase 检索相关 chunk
   -> Qwen Agent 格式化 knowledge
   -> LLM 基于召回内容回答
 ```
@@ -205,16 +206,16 @@ ESRetrievalTool.name = 'retrieval'
 
 因此对 Qwen Agent 来说，仍然是在调用 `retrieval` 工具；只是这个工具的底层实现从默认检索换成了 ES。
 
-### 6.4 ES 工具负责索引和搜索
+### 6.4 ES 工具与离线索引职责分离
 
 文件：`qwen_agent/tools/es_retrieval.py`
 
 ```python
-self.searcher.index_files(files)
 search_results = self.searcher.search(query, max_ref_token=self.max_ref_token)
 ```
 
-当前实现每次检索会先确保文件已写入 ES，再执行搜索。
+当前实现在线问答阶段只查询 ES，不再在问答链路中解析文件或写入索引。
+离线或增量写入由 `scripts/index_docs_to_es.py` 负责。
 
 ### 6.5 ES 搜索器负责底层细节
 
@@ -230,7 +231,7 @@ search_results = self.searcher.search(query, max_ref_token=self.max_ref_token)
 6. 使用 hash 生成 chunk ID，避免重复写入。
 7. 使用 `_mget` 检查已存在 chunk。
 8. 使用 `helpers.bulk` 批量写入 ES。
-9. 使用 `match`、`match_phrase`、`wildcard` 检索。
+9. 使用 `match`、`match_phrase` 检索。
 
 当前查询方式：
 
@@ -238,7 +239,6 @@ search_results = self.searcher.search(query, max_ref_token=self.max_ref_token)
 "should": [
     {"match": {"content": {"query": query, "boost": 2}}},
     {"match_phrase": {"content": {"query": query, "boost": 3}}},
-    *wildcard_should,
 ]
 ```
 
@@ -299,28 +299,21 @@ Elasticsearch 官方文档也强调 bulk API 的批量大小需要按业务压�
 
 当前 ES 检索已经能工作，但仍然是 demo 到工程化之间的状态。
 
-最重要的优化点是：
-
-```python
-self.searcher.index_files(files)
-```
-
-现在每次问答都会先调用 `index_files(files)`。虽然代码会通过 hash 和 `_mget` 跳过已存在 chunk，但它仍然需要遍历文件、解析文件、计算 hash。
-
-对当前 13 个文档没问题；如果增加到几百、几千个文档，就应该改为：
+最关键的优化已经拆出来了：
 
 1. 独立索引脚本负责把 `docs/` 写入 ES。
-2. 问答服务只查 ES，不每次解析全部文件。
-3. 文件变更时再做增量索引。
-4. GUI 显示索引状态、文档块数、最后索引时间。
+2. 问答服务只查 ES，不在问答链路里做文件解析和写入。
+3. 文件变更时通过文档签名做增量判断。
+4. GUI 显示索引状态、文档数和签名，方便确认当前知识库是否已更新。
+5. ES mapping 只保留正文检索字段，避免 `content.keyword` 这类长文本子字段带来的写入风险。
 
-推荐下一步结构：
+推荐结构：
 
 ```text
 scripts/index_docs_to_es.py       # 手动/离线索引 docs
 qwen_agent/tools/es_retrieval.py  # 查询时只 search
-qwen_agent/searcher/...           # 保留 ES 建索引和搜索能力
-qwen_agent_multi_files_gui.py     # 展示 ES 状态、索引名、文档块数
+qwen_agent/searcher/...           # 保留 ES 建索引、状态和搜索能力
+qwen_agent_multi_files_gui.py     # 展示 ES 状态、索引名、文档块数、签名
 ```
 
 ## 10. 使用场景总结
@@ -405,6 +398,7 @@ scripts/index_docs_to_es.py
 1. 手动或定时把 `docs/` 写入 ES。
 2. 问答时不再重复解析所有文档。
 3. GUI 显示索引状态。
+4. 支持 `--recreate` 进行 mapping 调整后的全量重建。
 
 ### 方向 B：增加 metadata
 
